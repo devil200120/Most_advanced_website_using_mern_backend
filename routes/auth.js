@@ -12,22 +12,24 @@ const logger = require('../utils/logger');
 const router = express.Router();
 
 // Register
+// ...existing code...
+
+// Register - Simplified validation
 router.post('/register', [
   body('firstName').trim().isLength({ min: 2 }).withMessage('First name must be at least 2 characters'),
   body('lastName').trim().isLength({ min: 2 }).withMessage('Last name must be at least 2 characters'),
   body('email').isEmail().normalizeEmail().withMessage('Please enter a valid email'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-  body('confirmPassword').custom((value, { req }) => {
-    if (value !== req.body.password) {
-      throw new Error('Passwords do not match');
-    }
-    return true;
-  }),
   body('role').isIn(['student', 'teacher', 'parent']).withMessage('Invalid role')
 ], async (req, res) => {
   try {
+    // Add CORS headers for this specific route
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Credentials', 'true');
+
     if (process.env.NODE_ENV === 'development') {
       console.log('=== REGISTRATION DEBUG ===');
+      console.log('Request headers:', JSON.stringify(req.headers, null, 2));
       console.log('Request body:', JSON.stringify(req.body, null, 2));
       console.log('========================');
     }
@@ -51,11 +53,7 @@ router.post('/register', [
       password, 
       role, 
       phone, 
-      dateOfBirth, 
-      grade, 
-      section, 
-      subject, 
-      qualification 
+      dateOfBirth
     } = req.body;
 
     // Check if user already exists
@@ -81,18 +79,14 @@ router.post('/register', [
       dateOfBirth,
       verificationToken,
       isVerified: false,
-      isActive: true // ENSURE USER IS ACTIVE BY DEFAULT
+      isActive: true
     };
 
-    // Add role-specific fields
+    // Add role-specific IDs only (optional fields like grade, section etc. can be added later in profile)
     if (role === 'student') {
       userData.studentId = `STU${Date.now()}`;
-      userData.grade = grade;
-      userData.section = section;
     } else if (role === 'teacher') {
       userData.teacherId = `TCH${Date.now()}`;
-      userData.subject = subject;
-      userData.qualification = qualification;
     }
 
     // Create user
@@ -149,6 +143,8 @@ router.post('/register', [
     });
   }
 });
+
+// ...existing code...
 
 // Login
 router.post('/login', [
