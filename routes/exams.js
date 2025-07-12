@@ -11,6 +11,8 @@ const logger = require('../utils/logger');
 const router = express.Router();
 
 // Get all exams
+// Get all exams
+// Get all exams - DEBUG VERSION
 router.get('/', auth, async (req, res) => {
   try {
     const { page = 1, limit = 10, subject, grade, status, search } = req.query;
@@ -24,14 +26,21 @@ router.get('/', auth, async (req, res) => {
       query.isPublished = true;
       query.isActive = true;
       
+      // For debugging: let's first show ALL published exams
+      // Comment out the date filters temporarily to see if any exams exist
+      
       // Check if exam is available for student
       const now = new Date();
       query.$or = [
         { eligibleStudents: req.user._id },
         { eligibleStudents: { $size: 0 } }
       ];
-      query['schedule.startDate'] = { $lte: now };
-      query['schedule.endDate'] = { $gte: now };
+      
+      // Temporarily comment out date filters for debugging
+      // query['schedule.endDate'] = { $gte: now };
+      
+      console.log('Student exam query:', JSON.stringify(query, null, 2));
+      console.log('Current date:', now);
     }
     
     if (subject) query.subject = subject;
@@ -44,12 +53,25 @@ router.get('/', auth, async (req, res) => {
       ];
     }
     
+    console.log('Final query:', JSON.stringify(query, null, 2));
+    
     const exams = await Exam.find(query)
       .populate('createdBy', 'firstName lastName')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .exec();
+    
+    console.log('Found exams count:', exams.length);
+    console.log('Exams:', exams.map(e => ({
+      id: e._id,
+      title: e.title,
+      isPublished: e.isPublished,
+      isActive: e.isActive,
+      scheduleStart: e.schedule?.startDate,
+      scheduleEnd: e.schedule?.endDate,
+      eligibleStudents: e.eligibleStudents?.length || 0
+    })));
     
     const total = await Exam.countDocuments(query);
     
@@ -64,13 +86,13 @@ router.get('/', auth, async (req, res) => {
     });
   } catch (error) {
     logger.error('Get exams error:', error);
+    console.error('Get exams error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
     });
   }
 });
-
 // Get exam by ID
 router.get('/:id', auth, async (req, res) => {
   try {
