@@ -12,6 +12,7 @@ const { Server } = require('socket.io');
 const cron = require('node-cron');
 const parentRoutes = require('./routes/parent');
 
+
 // Load environment variables
 dotenv.config();
 
@@ -25,7 +26,7 @@ const paymentRoutes = require('./routes/payments');
 const notificationRoutes = require('./routes/notifications');
 const reportRoutes = require('./routes/reports');
 const settingsRoutes = require('./routes/settings');
-const dashboardRoutes = require('./routes/dashboard');
+const dashboardRoutes = require('./routes/dashboard'); // ADD THIS LINE
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -35,24 +36,11 @@ const logger = require('./utils/logger');
 const app = express();
 const server = createServer(app);
 
-// Define allowed origins for CORS
-const allowedOrigins = [
-  'http://localhost:3000',
-  'https://aehtri.com',
-  'https://www.aehtri.com'
-];
-
-// Add environment-specific origins
-if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
-}
-
-// Socket.io setup with proper CORS
+// Socket.io setup
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST"],
-    credentials: true
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"]
   }
 });
 
@@ -89,24 +77,50 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
-// CORS configuration with multiple origins support
+// CORS configuration
+// ...existing code...
+
+// CORS configuration - Updated section around line 75
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
+    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || "http://localhost:3000",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
     } else {
-      return callback(new Error('Not allowed by CORS'));
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
+  optionsSuccessStatus: 200 // For legacy browser support
 }));
+
+// Handle preflight requests for all routes
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
+
+// ...existing code...
 
 // Middleware
 app.use(compression());
@@ -114,29 +128,17 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Replace the entire static file section (around lines 95-110) with this:
+
 // CORS configuration for static files
 app.use('/uploads', cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    } else {
-      return callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
   methods: ['GET'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept']
 }));
 
 app.use('/api/uploads', cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    } else {
-      return callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
   methods: ['GET'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept']
 }));
@@ -144,7 +146,6 @@ app.use('/api/uploads', cors({
 // Static file serving
 app.use('/uploads', express.static('uploads'));
 app.use('/api/uploads', express.static('uploads'));
-
 // Database connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/exam_management', {
   useNewUrlParser: true,
@@ -194,16 +195,17 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingsRoutes);
-app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/dashboard', dashboardRoutes); // ADD THIS LINE
 app.use('/api/parent', parentRoutes);
+app.use('/api/uploads', express.static('uploads')); // Add this line for API route compatibility
+
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    allowedOrigins: allowedOrigins
+    uptime: process.uptime()
   });
 });
 
@@ -213,7 +215,6 @@ app.get('/api/test', (req, res) => {
     success: true,
     message: 'Server is running properly',
     timestamp: new Date().toISOString(),
-    allowedOrigins: allowedOrigins,
     routes: [
       '/api/auth',
       '/api/users', 
@@ -224,8 +225,7 @@ app.get('/api/test', (req, res) => {
       '/api/notifications',
       '/api/reports',
       '/api/settings',
-      '/api/dashboard',
-      '/api/parent'
+      '/api/dashboard'
     ]
   });
 });
@@ -235,19 +235,14 @@ const examReminderJob = cron.schedule('0 0 * * *', async () => {
   // Send exam reminders
   console.log('Running exam reminder job...');
   // Implementation for sending exam reminders
-}, {
-  scheduled: false
 });
 
 const cleanupJob = cron.schedule('0 2 * * *', async () => {
   // Cleanup old files and logs
   console.log('Running cleanup job...');
   // Implementation for cleanup tasks
-}, {
-  scheduled: false
 });
 
-// Start cron jobs
 examReminderJob.start();
 cleanupJob.start();
 
@@ -281,7 +276,6 @@ server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   console.log(`Server running on port ${PORT}`);
   console.log(`Dashboard routes available at: http://localhost:${PORT}/api/dashboard`);
-  console.log(`Allowed origins: ${allowedOrigins.join(', ')}`);
 });
 
 module.exports = { app, io };
