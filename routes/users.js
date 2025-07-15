@@ -574,7 +574,97 @@ router.get('/profile', auth, async (req, res) => {
     });
   }
 });
+router.put('/:id', auth, authorize('admin'), upload.single('avatar'), [
+  body('firstName').optional().trim().isLength({ min: 2 }).withMessage('First name must be at least 2 characters'),
+  body('lastName').optional().trim().isLength({ min: 2 }).withMessage('Last name must be at least 2 characters'),
+  body('email').optional().isEmail().withMessage('Please enter a valid email'),
+  body('phone').optional().isMobilePhone().withMessage('Please enter a valid phone number'),
+  body('role').optional().isIn(['student', 'teacher', 'parent', 'admin']).withMessage('Invalid role'),
+  body('isActive').optional().isBoolean().withMessage('isActive must be a boolean'),
+  body('dateOfBirth').optional().isISO8601().withMessage('Please enter a valid date')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
 
+    const userId = req.params.id;
+    const updateData = {};
+    
+    // Fields that can be updated by admin
+    const allowedFields = [
+      'firstName', 'lastName', 'email', 'phone', 'role', 
+      'isActive', 'dateOfBirth', 'address', 'school', 'grade'
+    ];
+    
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    });
+    
+    // Handle avatar upload
+    if (req.file) {
+      updateData.avatar = req.file.path;
+    }
+    
+    // Check if email is being changed and if it already exists
+    if (updateData.email) {
+      const existingUser = await User.findOne({ 
+        email: updateData.email, 
+        _id: { $ne: userId } 
+      });
+      
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already exists'
+        });
+      }
+    }
+    
+    const user = await User.findByIdAndUpdate(
+      userId,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    logger.info(`User updated by admin: ${user.email} - Updated by: ${req.user.email}`);
+    
+    res.json({
+      success: true,
+      message: 'User updated successfully',
+      data: { user }
+    });
+  } catch (error) {
+    logger.error('Admin update user error:', error);
+    
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
 // THEN keep your existing /:id route after these specific routes
 
 // Get user by ID
@@ -686,6 +776,11 @@ router.put('/profile', auth, upload.single('avatar'), [
     });
   }
 });
+
+// Add this route before the DELETE /:id route (around line 691)
+
+// Update user (Admin only)
+
 
 // Delete user (Admin only)
 router.delete('/:id', auth, authorize('admin'), async (req, res) => {
