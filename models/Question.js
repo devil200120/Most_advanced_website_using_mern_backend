@@ -111,12 +111,19 @@ questionSchema.virtual('successRate').get(function() {
 });
 
 // Method to validate answer
+// Method to validate answer
 questionSchema.methods.validateAnswer = function(userAnswer) {
   switch (this.type) {
     case 'multiple-choice':
-      return this.correctAnswer === userAnswer;
+      // Handle case-insensitive comparison and trim whitespace
+      const correctAnswer = String(this.correctAnswer).toLowerCase().trim();
+      const userAnswerNormalized = String(userAnswer).toLowerCase().trim();
+      return correctAnswer === userAnswerNormalized;
     case 'true-false':
-      return this.correctAnswer === userAnswer;
+      // Handle case-insensitive comparison for true/false
+      const correctBool = String(this.correctAnswer).toLowerCase().trim();
+      const userBool = String(userAnswer).toLowerCase().trim();
+      return correctBool === userBool;
     case 'fill-blanks':
       if (Array.isArray(this.correctAnswer)) {
         return this.correctAnswer.every((answer, index) => 
@@ -134,7 +141,6 @@ questionSchema.methods.validateAnswer = function(userAnswer) {
       return false;
   }
 };
-
 // Method to calculate marks for answer
 questionSchema.methods.calculateMarks = function(userAnswer) {
   const isCorrect = this.validateAnswer(userAnswer);
