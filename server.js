@@ -135,13 +135,13 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', cors({
   origin: process.env.FRONTEND_URL || "http://localhost:3000",
   methods: ['GET'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept']
+  allowedHeaders: ['Origin',  'Content-Type', 'Accept']
 }));
 
 app.use('/api/uploads', cors({
   origin: process.env.FRONTEND_URL || "http://localhost:3000",
   methods: ['GET'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept']
+  allowedHeaders: ['Origin',  'Content-Type', 'Accept']
 }));
 
 // Static file serving
