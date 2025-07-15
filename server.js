@@ -10,8 +10,8 @@ const rateLimit = require('express-rate-limit');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cron = require('node-cron');
-const path = require('path');
 const parentRoutes = require('./routes/parent');
+
 
 // Load environment variables
 dotenv.config();
@@ -26,7 +26,7 @@ const paymentRoutes = require('./routes/payments');
 const notificationRoutes = require('./routes/notifications');
 const reportRoutes = require('./routes/reports');
 const settingsRoutes = require('./routes/settings');
-const dashboardRoutes = require('./routes/dashboard');
+const dashboardRoutes = require('./routes/dashboard'); // ADD THIS LINE
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -44,16 +44,16 @@ const io = new Server(server, {
   }
 });
 
-// Security middleware - Updated for avatar images
+// Security middleware
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https:"],
       scriptSrc: ["'self'", "https:"],
-      imgSrc: ["'self'", "data:", "https:", "http://localhost:5000"], // Added localhost for images
+      imgSrc: ["'self'", "data:", "https:"],
       fontSrc: ["'self'", "https:"],
-      connectSrc: ["'self'", "https:", "http://localhost:5000"], // Added localhost
+      connectSrc: ["'self'", "https:"],
       mediaSrc: ["'self'"],
       objectSrc: ["'none'"],
       childSrc: ["'self'"],
@@ -65,8 +65,7 @@ app.use(helmet({
       frameAncestors: ["'none'"],
       upgradeInsecureRequests: []
     }
-  },
-  crossOriginResourcePolicy: { policy: "cross-origin" } // Added this for images
+  }
 }));
 
 // Rate limiting
@@ -78,7 +77,10 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
-// CORS configuration - Updated and improved
+// CORS configuration
+// ...existing code...
+
+// CORS configuration - Updated section around line 75
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -87,10 +89,7 @@ app.use(cors({
     const allowedOrigins = [
       process.env.FRONTEND_URL || "http://localhost:3000",
       "http://localhost:3000",
-      "http://127.0.0.1:3000",
-       "https://www.aehtri.com",
-      "https://aehtri.com",
-  "https://most-advanced-website-using-mern-backend.onrender.com"
+      "http://127.0.0.1:3000"
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
@@ -104,9 +103,9 @@ app.use(cors({
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
+    
     'Accept',
-    'Origin',
-    'X-Requested-With'
+    'Origin'
   ],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
   optionsSuccessStatus: 200 // For legacy browser support
@@ -121,45 +120,32 @@ app.options('*', (req, res) => {
   res.sendStatus(200);
 });
 
+// ...existing code...
+
 // Middleware
 app.use(compression());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// FIXED: Static file serving for uploads with proper CORS headers
-app.use('/uploads', (req, res, next) => {
-  // Set CORS headers for static files
-  res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
-  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.header('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
-  }
-}, express.static(path.join(__dirname, 'uploads')));
+// Replace the entire static file section (around lines 95-110) with this:
 
-app.use('/api/uploads', (req, res, next) => {
-  // Set CORS headers for API uploads route
-  res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
-  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.header('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
-  }
-}, express.static(path.join(__dirname, 'uploads')));
+// CORS configuration for static files
+app.use('/uploads', cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  methods: ['GET'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept']
+}));
 
+app.use('/api/uploads', cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  methods: ['GET'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept']
+}));
+
+// Static file serving
+app.use('/uploads', express.static('uploads'));
+app.use('/api/uploads', express.static('uploads'));
 // Database connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/exam_management', {
   useNewUrlParser: true,
@@ -209,8 +195,10 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingsRoutes);
-app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/dashboard', dashboardRoutes); // ADD THIS LINE
 app.use('/api/parent', parentRoutes);
+app.use('/api/uploads', express.static('uploads')); // Add this line for API route compatibility
+
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -239,22 +227,6 @@ app.get('/api/test', (req, res) => {
       '/api/settings',
       '/api/dashboard'
     ]
-  });
-});
-
-// Test endpoint for avatar access
-app.get('/api/test-avatar', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Avatar endpoint working',
-    uploadsPaths: [
-      '/uploads/avatars/',
-      '/api/uploads/avatars/'
-    ],
-    corsHeaders: {
-      'Access-Control-Allow-Origin': 'http://localhost:3000',
-      'Cross-Origin-Resource-Policy': 'cross-origin'
-    }
   });
 });
 
@@ -304,8 +276,6 @@ server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   console.log(`Server running on port ${PORT}`);
   console.log(`Dashboard routes available at: http://localhost:${PORT}/api/dashboard`);
-  console.log(`Avatar uploads available at: http://localhost:${PORT}/uploads/avatars/`);
-  console.log(`API uploads available at: http://localhost:${PORT}/api/uploads/avatars/`);
 });
 
 module.exports = { app, io };
