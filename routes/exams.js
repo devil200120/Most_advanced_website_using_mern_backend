@@ -94,9 +94,10 @@ router.get('/', auth, async (req, res) => {
   }
 });
 // Get exam by ID
-router.get('/:id', auth, async (req, res) => {
+// Update line 97 to use examId instead of id
+router.get('/:examId', auth, async (req, res) => {
   try {
-    const exam = await Exam.findById(req.params.id)
+    const exam = await Exam.findById(req.params.examId)  // Change from req.params.id
       .populate('createdBy', 'firstName lastName')
       .populate('questions');
     
@@ -106,7 +107,7 @@ router.get('/:id', auth, async (req, res) => {
         message: 'Exam not found'
       });
     }
-    
+
     // Check if user can access this exam
     if (req.user.role === 'student') {
       if (!exam.isAvailableForStudent(req.user._id)) {
@@ -122,9 +123,13 @@ router.get('/:id', auth, async (req, res) => {
       });
     }
     
+    // Return both exam and questions
     res.json({
       success: true,
-      data: { exam }
+      data: { 
+        exam,
+        questions: exam.questions // Include questions in response
+      }
     });
   } catch (error) {
     logger.error('Get exam by ID error:', error);
@@ -134,7 +139,87 @@ router.get('/:id', auth, async (req, res) => {
     });
   }
 });
-
+router.post('/:examId/start', auth, authorize('student'), async (req, res) => {
+  try {
+    console.log('Starting exam:', req.params.examId, 'for user:', req.user._id);
+    
+    const examId = req.params.examId;
+    
+    // Find exam
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found'
+      });
+    }
+    
+    // Check if exam is available
+    if (!exam.isAvailableForStudent(req.user._id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Exam is not available for you'
+      });
+    }
+    
+    // Check if student has already attempted
+    const existingSubmission = await Submission.findOne({
+      student: req.user._id,
+      exam: examId,
+      isSubmitted: true
+    });
+    
+    if (existingSubmission && !exam.settings.allowMultipleAttempts) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already attempted this exam'
+      });
+    }
+    
+    // Check attempt limit
+    const attemptCount = await Submission.countDocuments({
+      student: req.user._id,
+      exam: examId,
+      isSubmitted: true
+    });
+    
+    if (exam.settings && attemptCount >= (exam.settings.maxAttempts || 1)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum attempts exceeded'
+      });
+    }
+    
+    // Create new submission
+    const submission = new Submission({
+      student: req.user._id,
+      exam: examId,
+      startTime: new Date(),
+      attemptNumber: attemptCount + 1,
+      answers: []
+    });
+    
+    await submission.save();
+    
+    logger.info(`Exam started: ${exam.title} by ${req.user.email}`);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Exam started successfully',
+      data: { 
+        submission,
+        examId: examId
+      }
+    });
+  } catch (error) {
+    console.error('Start exam error:', error);
+    logger.error('Start exam error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
 // Create new exam
 router.post('/', auth, authorize('teacher', 'admin'), upload.array('attachments', 5), [
   body('title').trim().isLength({ min: 3 }).withMessage('Title must be at least 3 characters'),
@@ -191,9 +276,9 @@ router.post('/', auth, authorize('teacher', 'admin'), upload.array('attachments'
 });
 
 // Update exam
-router.put('/:id', auth, authorize('teacher', 'admin'), upload.array('attachments', 5), async (req, res) => {
+router.put('/:examId', auth, authorize('teacher', 'admin'), upload.array('attachments', 5), async (req, res) => {
   try {
-    const exam = await Exam.findById(req.params.id);
+    const exam = await Exam.findById(req.params.examId);
     
     if (!exam) {
       return res.status(404).json({
@@ -224,7 +309,7 @@ router.put('/:id', auth, authorize('teacher', 'admin'), upload.array('attachment
     }
     
     const updatedExam = await Exam.findByIdAndUpdate(
-      req.params.id,
+      req.params.examId,
       updateData,
       { new: true, runValidators: true }
     ).populate('createdBy', 'firstName lastName');
@@ -246,9 +331,9 @@ router.put('/:id', auth, authorize('teacher', 'admin'), upload.array('attachment
 });
 
 // Delete exam
-router.delete('/:id', auth, authorize('teacher', 'admin'), async (req, res) => {
+router.delete('/:examId', auth, authorize('teacher', 'admin'), async (req, res) => {
   try {
-    const exam = await Exam.findById(req.params.id);
+    const exam = await Exam.findById(req.params.examId);
     
     if (!exam) {
       return res.status(404).json({
@@ -265,7 +350,7 @@ router.delete('/:id', auth, authorize('teacher', 'admin'), async (req, res) => {
       });
     }
     
-    await Exam.findByIdAndDelete(req.params.id);
+    await Exam.findByIdAndDelete(req.params.examId);
     
     logger.info(`Exam deleted: ${exam.title} by ${req.user.email}`);
     
@@ -283,7 +368,7 @@ router.delete('/:id', auth, authorize('teacher', 'admin'), async (req, res) => {
 });
 
 // Add questions to exam
-router.post('/:id/questions', auth, authorize('teacher', 'admin'), [
+router.post('/:examId/questions', auth, authorize('teacher', 'admin'), [
   body('questionIds').isArray().withMessage('Question IDs must be an array'),
   body('questionIds.*').isMongoId().withMessage('Valid question ID required')
 ], async (req, res) => {
@@ -297,7 +382,7 @@ router.post('/:id/questions', auth, authorize('teacher', 'admin'), [
       });
     }
     
-    const exam = await Exam.findById(req.params.id);
+    const exam = await Exam.findById(req.params.examId);
     
     if (!exam) {
       return res.status(404).json({
@@ -347,9 +432,9 @@ router.post('/:id/questions', auth, authorize('teacher', 'admin'), [
 });
 
 // Publish exam
-router.put('/:id/publish', auth, authorize('teacher', 'admin'), async (req, res) => {
+router.put('/:examId/publish', auth, authorize('teacher', 'admin'), async (req, res) => {
   try {
-    const exam = await Exam.findById(req.params.id);
+    const exam = await Exam.findById(req.params.examId);
     
     if (!exam) {
       return res.status(404).json({
@@ -394,9 +479,9 @@ router.put('/:id/publish', auth, authorize('teacher', 'admin'), async (req, res)
 });
 
 // Get exam statistics
-router.get('/:id/stats', auth, authorize('teacher', 'admin'), async (req, res) => {
+router.get('/:examId/stats', auth, authorize('teacher', 'admin'), async (req, res) => {
   try {
-    const exam = await Exam.findById(req.params.id);
+    const exam = await Exam.findById(req.params.examId);
     
     if (!exam) {
       return res.status(404).json({
@@ -429,6 +514,53 @@ router.get('/:id/stats', auth, authorize('teacher', 'admin'), async (req, res) =
     });
   } catch (error) {
     logger.error('Get exam stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+// Add this route to backend/routes/exams.js
+router.get('/:examId/result', auth, authorize('student'), async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user._id;
+
+    // Find the exam
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found'
+      });
+    }
+
+    // Find the student's submission for this exam
+    const submission = await Submission.findOne({
+      exam: examId,
+      student: studentId,
+      isSubmitted: true
+    })
+    .populate('exam', 'title subject grade totalMarks questions')
+    .populate('answers.questionId')
+    .sort({ submittedAt: -1 }); // Get the latest submission if multiple attempts
+
+    if (!submission) {
+      return res.status(404).json({
+        success: false,
+        message: 'No submitted exam found. You may not have completed this exam yet.'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        result: submission,
+        exam: submission.exam
+      }
+    });
+  } catch (error) {
+    logger.error('Get exam result error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
