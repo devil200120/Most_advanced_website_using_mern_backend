@@ -8,7 +8,203 @@ const { auth, authorize } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
 const router = express.Router();
+// Add this RIGHT AFTER the router declaration (around line 11, before the /start route)
 
+// Handle direct submission (what the frontend is currently calling)
+// Handle direct submission (what the frontend is currently calling)
+router.post('/', auth, authorize('student'), async (req, res) => {
+  try {
+    console.log('📝 Direct submission received:', req.body);
+    
+    const { examId, answers, timeSpent, securityFlags } = req.body;
+    
+    if (!examId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Exam ID is required'
+      });
+    }
+
+    // Find the exam
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found'
+      });
+    }
+if (!exam.isAvailableForStudent(req.user._id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Exam is not available for you'
+      });
+    }
+
+    // ✅ ADD THIS MULTIPLE ATTEMPT PREVENTION CODE
+    // Check if student has already attempted this exam
+    const existingSubmission = await Submission.findOne({
+      student: req.user._id,
+      exam: examId,
+      isSubmitted: true
+    });
+
+    if (existingSubmission && !exam.settings.allowMultipleAttempts) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already attempted this exam. Multiple attempts are not allowed.'
+      });
+    }
+
+    // Check attempt limit if multiple attempts are allowed
+    const attemptCount = await Submission.countDocuments({
+      student: req.user._id,
+      exam: examId,
+      isSubmitted: true
+    });
+
+    if (exam.settings.allowMultipleAttempts && attemptCount >= exam.settings.maxAttempts) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum attempts (${exam.settings.maxAttempts}) exceeded for this exam.`
+      });
+    }
+    // Find existing submission or create new one
+    let submission = await Submission.findOne({
+      student: req.user._id,
+      exam: examId,
+      isSubmitted: false
+    });
+
+    if (!submission) {
+      // Create new submission if none exists
+      submission = new Submission({
+        student: req.user._id,
+        exam: examId,
+        startTime: new Date(Date.now() - (timeSpent * 1000) || 0),
+        answers: [],
+        attemptNumber: 1
+      });
+    }
+
+    // Convert answers to the required format with proper validation
+    const formattedAnswers = [];
+    for (const questionId in answers) {
+      if (answers[questionId] && answers[questionId].trim() !== '') {
+        try {
+          // Find the question to validate the answer
+          const question = await Question.findById(questionId);
+          if (question) {
+            const userAnswer = answers[questionId].trim();
+            const isCorrect = question.validateAnswer(userAnswer);
+            const marksAwarded = question.calculateMarks(userAnswer);
+            
+            formattedAnswers.push({
+              questionId,
+              answer: userAnswer,
+              timeTaken: Math.floor((timeSpent || 300) / Object.keys(answers).length) || 30,
+              isCorrect: isCorrect,
+              marksAwarded: marksAwarded || 0
+            });
+          } else {
+            console.warn(`Question ${questionId} not found`);
+            formattedAnswers.push({
+              questionId,
+              answer: answers[questionId].trim(),
+              timeTaken: Math.floor((timeSpent || 300) / Object.keys(answers).length) || 30,
+              isCorrect: false,
+              marksAwarded: 0
+            });
+          }
+        } catch (questionError) {
+          console.error(`Error processing question ${questionId}:`, questionError);
+          formattedAnswers.push({
+            questionId,
+            answer: answers[questionId].trim(),
+            timeTaken: Math.floor((timeSpent || 300) / Object.keys(answers).length) || 30,
+            isCorrect: false,
+            marksAwarded: 0
+          });
+        }
+      }
+    }
+
+    // Update submission
+    submission.answers = formattedAnswers;
+    submission.isSubmitted = true;
+    submission.submittedAt = new Date();
+    submission.endTime = new Date();
+    submission.timeTaken = Math.floor((timeSpent || 300) / 60) || 1;
+    
+    // Add security flags if provided
+    if (securityFlags) {
+      submission.securityFlags = {
+        tabSwitches: securityFlags.tabSwitches || 0,
+        fullscreenExited: securityFlags.fullscreenExited || 0,
+        warningsReceived: securityFlags.warningsReceived || 0
+      };
+    }
+
+    // Calculate total marks and scores
+    let totalMarks = 0;
+    let obtainedMarks = 0;
+    
+    formattedAnswers.forEach(answer => {
+      obtainedMarks += answer.marksAwarded || 0;
+    });
+    
+    // Get total marks from exam questions
+    const examQuestions = await Question.find({ _id: { $in: formattedAnswers.map(a => a.questionId) } });
+    totalMarks = examQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
+    
+    submission.totalMarks = totalMarks;
+    submission.marksObtained = obtainedMarks;
+    submission.percentage = totalMarks > 0 ? Math.round((obtainedMarks / totalMarks) * 100) : 0;
+    
+    // Assign grade
+    const percentage = submission.percentage;
+    if (percentage >= 90) submission.grade = 'A+';
+    else if (percentage >= 80) submission.grade = 'A';
+    else if (percentage >= 70) submission.grade = 'B+';
+    else if (percentage >= 60) submission.grade = 'B';
+    else if (percentage >= 50) submission.grade = 'C';
+    else if (percentage >= 40) submission.grade = 'D';
+    else submission.grade = 'F';
+    
+    // Check if passed
+    submission.isPassed = submission.percentage >= (exam.passingMarks || 60);
+    submission.isGraded = true;
+
+    // Save submission
+    await submission.save();
+
+    // Update exam analytics
+    try {
+      await Exam.findByIdAndUpdate(examId, {
+        $inc: { 'analytics.totalAttempts': 1 }
+      });
+    } catch (analyticsError) {
+      console.warn('Analytics update error (non-critical):', analyticsError.message);
+    }
+
+    logger.info(`Exam submitted directly: ${exam.title} by ${req.user.email} - Score: ${submission.percentage}%`);
+
+    res.json({
+      success: true,
+      message: 'Exam submitted successfully',
+      data: { 
+        submission,
+        submissionId: submission._id
+      }
+    });
+  } catch (error) {
+    console.error('❌ Direct submission error:', error);
+    logger.error('Direct submission error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+});
 // Start exam (Create submission)
 router.post('/start', auth, authorize('student'), [
   body('examId').isMongoId().withMessage('Valid exam ID required')
@@ -257,6 +453,55 @@ router.post('/submit', auth, authorize('student'), [
     });
   } catch (error) {
     logger.error('Submit exam error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+// Check if student has previous attempts for an exam
+router.get('/check/:examId', auth, authorize('student'), async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user._id;
+
+    // Find exam
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: 'Exam not found'
+      });
+    }
+
+    // Count submitted attempts
+    const attemptCount = await Submission.countDocuments({
+      student: studentId,
+      exam: examId,
+      isSubmitted: true
+    });
+
+    // Check if any attempt exists
+    const hasAttempted = attemptCount > 0;
+
+    // Check if can attempt again
+    const canAttempt = !hasAttempted || 
+                      (exam.settings.allowMultipleAttempts && attemptCount < exam.settings.maxAttempts);
+
+    res.json({
+      success: true,
+      data: {
+        hasAttempted,
+        attemptCount,
+        maxAttempts: exam.settings.maxAttempts,
+        allowMultipleAttempts: exam.settings.allowMultipleAttempts,
+        canAttempt,
+        nextAttemptNumber: attemptCount + 1
+      }
+    });
+
+  } catch (error) {
+    logger.error('Check attempts error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
