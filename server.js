@@ -88,7 +88,8 @@ app.use(cors({
       process.env.FRONTEND_URL || "http://localhost:3000",
       "http://localhost:3000",
       "http://127.0.0.1:3000",
-       "https://www.aehtri.com/"
+       "https://www.aehtri.com",
+      "https://aehtri.com"
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
