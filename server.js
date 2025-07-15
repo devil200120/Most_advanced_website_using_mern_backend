@@ -109,7 +109,7 @@ app.use(cors({
     'Accept',
     'Origin'
   ],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  exposedHeaders: ['Content-Range'],
   optionsSuccessStatus: 200 // For legacy browser support
 }));
 
